@@ -2,7 +2,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-const { v4: uuidv4 } = require("uuid"); // for unique question IDs
+const { v4: uuidv4 } = require("uuid");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -10,12 +10,12 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // In-memory storage
 const kudos = {};        // { userId: points }
-const topics = {};       // { topicName: true }
-const expertise = {};    // { userId: [topicName] }
+const domains = {};      // { domainName: true }
+const expertise = {};    // { userId: [domainName] }
 const badges = {};       // { userId: [badgeName] }
-const questions = {};    // { questionId: { text, topic, author, taggedExperts, answers: [] } }
+const questions = {};    // { questionId: { text, domain, author, taggedExperts, answers: [] } }
 
-// Helper to send Slack blocks via webhook
+// Helper to send Slack blocks
 async function postToSlack(blocks) {
   try {
     await axios.post(process.env.SLACK_WEBHOOK_URL, { blocks });
@@ -68,53 +68,53 @@ app.post("/slack/commands", async (req, res) => {
     }
   }
 
-  // ================== /topic ==================
-  else if (command === "/topic") {
+  // ================== /domain ==================
+  else if (command === "/domain") {
     const action = args[0];
-    const topicName = args.slice(1).join(" ");
-    if (action === "add" && topicName) {
-      topics[topicName] = true;
+    const domainName = args.slice(1).join(" ");
+    if (action === "add" && domainName) {
+      domains[domainName] = true;
       expertise[user_id] = expertise[user_id] || [];
-      if (!expertise[user_id].includes(topicName)) expertise[user_id].push(topicName);
+      if (!expertise[user_id].includes(domainName)) expertise[user_id].push(domainName);
 
       await postToSlack([
-        { type: "section", text: { type: "mrkdwn", text: `:bulb: <@${user_id}> added *${topicName}* to their topics.` } }
+        { type: "section", text: { type: "mrkdwn", text: `:bulb: <@${user_id}> added *${domainName}* to their domains.` } }
       ]);
     } else if (action === "list") {
-      const allTopics = Object.keys(topics).join(", ") || "No topics yet.";
+      const allDomains = Object.keys(domains).join(", ") || "No domains yet.";
       await postToSlack([
-        { type: "section", text: { type: "mrkdwn", text: `:scroll: Current topics: ${allTopics}` } }
+        { type: "section", text: { type: "mrkdwn", text: `:scroll: Current domains: ${allDomains}` } }
       ]);
     } else if (action === "show") {
-      const userTopics = (expertise[user_id] || []).join(", ") || "No topics yet.";
+      const userDomains = (expertise[user_id] || []).join(", ") || "No domains yet.";
       await postToSlack([
-        { type: "section", text: { type: "mrkdwn", text: `:bulb: <@${user_id}>'s topics: ${userTopics}` } }
+        { type: "section", text: { type: "mrkdwn", text: `:bulb: <@${user_id}>'s domains: ${userDomains}` } }
       ]);
     }
   }
 
   // ================== /question ==================
   else if (command === "/question") {
-    const topic = args[0];
+    const domain = args[0];
     const questionText = args.slice(1).join(" ");
     const questionId = uuidv4();
 
     // Auto-tag experts
     const taggedExperts = [];
-    for (const [uid, userTopics] of Object.entries(expertise)) {
-      if (userTopics.includes(topic) && uid !== user_id) taggedExperts.push(`<@${uid}>`);
+    for (const [uid, userDomains] of Object.entries(expertise)) {
+      if (userDomains.includes(domain) && uid !== user_id) taggedExperts.push(`<@${uid}>`);
     }
 
     questions[questionId] = {
       text: questionText,
-      topic,
+      domain,
       author: user_id,
       taggedExperts,
       answers: []
     };
 
     await postToSlack([
-      { type: "section", text: { type: "mrkdwn", text: `:question: *New Question about ${topic}*\n*ID:* ${questionId}\nPosted by <@${user_id}>:\n"${questionText}"` } },
+      { type: "section", text: { type: "mrkdwn", text: `:question: *New Question about ${domain}*\n*ID:* ${questionId}\nPosted by <@${user_id}>:\n"${questionText}"` } },
       { type: "section", text: { type: "mrkdwn", text: `:bulb: Experts tagged: ${taggedExperts.join(", ") || "None"}` } }
     ]);
   }
@@ -123,12 +123,11 @@ app.post("/slack/commands", async (req, res) => {
   else if (command === "/answer") {
     const questionId = args[0];
     const remainingArgs = args.slice(1);
-    
+
     if (!questions[questionId]) return;
 
-    // Check if marking best answer
     if (remainingArgs[0] === "best") {
-      // Only the question author can mark best answer
+      // Only question author can mark best answer
       if (questions[questionId].author !== user_id) {
         await postToSlack([
           { type: "section", text: { type: "mrkdwn", text: `:no_entry: Only the question author can mark the best answer.` } }
@@ -137,9 +136,8 @@ app.post("/slack/commands", async (req, res) => {
       }
 
       const bestAnswerText = remainingArgs.slice(1, -1).join(" ");
-      const badgeName = remainingArgs[remainingArgs.length - 1]; // optional badge
+      const badgeName = remainingArgs[remainingArgs.length - 1];
 
-      // Find the answer
       const answerObj = questions[questionId].answers.find(a => a.text === bestAnswerText);
       if (!answerObj) {
         await postToSlack([
@@ -148,7 +146,6 @@ app.post("/slack/commands", async (req, res) => {
         return;
       }
 
-      // Mark as best
       answerObj.best = true;
 
       // Award points
@@ -166,7 +163,6 @@ app.post("/slack/commands", async (req, res) => {
         { type: "section", text: { type: "mrkdwn", text: `Awarded ${bonusPoints} points${badgeName ? ` and badge *${badgeName}*` : ""}!` } }
       ]);
     } else {
-      // Regular answer submission
       const answerText = remainingArgs.join(" ");
       const answerObj = { user: user_id, text: answerText, best: false };
       questions[questionId].answers.push(answerObj);
@@ -181,7 +177,7 @@ app.post("/slack/commands", async (req, res) => {
   else if (command === "/leaderboard") {
     const sorted = Object.entries(kudos)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 10); // top 10
+      .slice(0, 10);
 
     const leaderboardText = sorted
       .map(([uid, total], i) => `${i + 1}. <@${uid}> — *${total} points*`)
@@ -196,9 +192,9 @@ app.post("/slack/commands", async (req, res) => {
 
   // ================== /question-query ==================
   else if (command === "/question-query") {
-    const topic = args[0];
+    const domain = args[0];
     const filteredQuestions = Object.entries(questions)
-      .filter(([id, q]) => !topic || q.topic === topic)
+      .filter(([id, q]) => !domain || q.domain === domain)
       .map(([id, q]) => {
         const bestAnswer = q.answers.find(a => a.best);
         return `*${id}* — ${q.text} (posted by <@${q.author}>)${bestAnswer ? `\n:tada: Best Answer: "${bestAnswer.text}" by <@${bestAnswer.user}>` : ""}`;
@@ -206,10 +202,37 @@ app.post("/slack/commands", async (req, res) => {
       .join("\n") || "No questions found.";
 
     await postToSlack([
-      { type: "section", text: { type: "mrkdwn", text: `:scroll: Questions${topic ? " about " + topic : ""}:\n${filteredQuestions}` } }
+      { type: "section", text: { type: "mrkdwn", text: `:scroll: Questions${domain ? " about " + domain : ""}:\n${filteredQuestions}` } }
     ]);
   }
 });
+
+// ================== Auto-complete endpoints ==================
+
+// Return matching domains for Slack auto-complete
+app.post("/slack/options-domain", (req, res) => {
+  const { value } = req.body; // what user typed
+  const options = Object.keys(domains)
+    .filter(d => d.toLowerCase().includes((value || "").toLowerCase()))
+    .map(d => ({ text: { type: "plain_text", text: d }, value: d }));
+
+  res.json({ options });
+});
+
+// Return matching badges for Slack auto-complete
+app.post("/slack/options-badge", (req, res) => {
+  const { value } = req.body;
+  // Gather all existing badges across users
+  const allBadges = new Set();
+  Object.values(badges).forEach(list => list.forEach(b => allBadges.add(b)));
+
+  const options = Array.from(allBadges)
+    .filter(b => b.toLowerCase().includes((value || "").toLowerCase()))
+    .map(b => ({ text: { type: "plain_text", text: b }, value: b }));
+
+  res.json({ options });
+});
+
 
 // Landing page
 app.get("/", (req, res) => {
