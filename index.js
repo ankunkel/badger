@@ -228,19 +228,19 @@ app.post("/slack/commands", async (req, res) => {
 
       // ---------------- /best-answer ----------------
       case "/best-answer": {
-        // Format: /best-answer [question-id] @user [points]
+        // Format: /best-answer [question-id] @user [optional: points]
         const parts = text.trim().split(/\s+/);
-        if (parts.length < 3) {
-          await postToSlack("❌ Usage: `/best-answer [question-id] @user [points]`");
+        if (parts.length < 2) {
+          await postToSlack("❌ Usage: `/best-answer [question-id] @user [optional: points]`");
           break;
         }
         
         const questionId = parseInt(parts[0]);
         const userMatch = parts[1].match(/<@([A-Z0-9]+)(\|[^>]+)?>/);
-        const points = parseInt(parts[2]);
+        const points = parts[2] ? parseInt(parts[2]) : 5; // Default to 5 points
         
         if (!userMatch || isNaN(points) || points <= 0) {
-          await postToSlack("❌ Invalid format. Usage: `/best-answer [question-id] @user [points]`");
+          await postToSlack("❌ Invalid format. Usage: `/best-answer [question-id] @user [optional: points]`");
           break;
         }
         
